@@ -1,0 +1,105 @@
+diff -urN linux-3.10.0-862.el7.orig/arch/x86/include/asm/entry_arch.h linux-3.10.0-862.el7/arch/x86/include/asm/entry_arch.h
+--- linux-3.10.0-862.el7.orig/arch/x86/include/asm/entry_arch.h	2018-03-22 05:40:12.000000000 +0800
++++ linux-3.10.0-862.el7/arch/x86/include/asm/entry_arch.h	2018-11-10 12:56:20.992129987 +0800
+@@ -17,6 +17,7 @@
+ 		 smp_irq_move_cleanup_interrupt)
+ BUILD_INTERRUPT3(reboot_interrupt, REBOOT_VECTOR, smp_reboot_interrupt)
+ #endif
++BUILD_INTERRUPT3(acc_service_interrupt, ACC_SERVICE_VECTOR, smp_acc_service_interrupt)
+ 
+ BUILD_INTERRUPT(x86_platform_ipi, X86_PLATFORM_IPI_VECTOR)
+ 
+diff -urN linux-3.10.0-862.el7.orig/arch/x86/include/asm/hw_irq.h linux-3.10.0-862.el7/arch/x86/include/asm/hw_irq.h
+--- linux-3.10.0-862.el7.orig/arch/x86/include/asm/hw_irq.h	2018-03-22 05:40:12.000000000 +0800
++++ linux-3.10.0-862.el7/arch/x86/include/asm/hw_irq.h	2018-11-10 13:38:53.695386824 +0800
+@@ -74,6 +74,7 @@
+ 
+ extern void irq_move_cleanup_interrupt(void);
+ extern void reboot_interrupt(void);
++extern void acc_service_interrupt(void);
+ extern void threshold_interrupt(void);
+ extern void deferred_error_interrupt(void);
+ 
+@@ -94,6 +95,7 @@
+ extern void trace_call_function_interrupt(void);
+ extern void trace_call_function_single_interrupt(void);
+ #define trace_irq_move_cleanup_interrupt  irq_move_cleanup_interrupt
++#define trace_acc_service_interrupt  acc_service_interrupt
+ #define trace_reboot_interrupt  reboot_interrupt
+ #define trace_kvm_posted_intr_ipi kvm_posted_intr_ipi
+ #define trace_kvm_posted_intr_wakeup_ipi kvm_posted_intr_wakeup_ipi
+@@ -193,6 +195,7 @@
+ #ifdef CONFIG_X86_IO_APIC
+ extern asmlinkage void smp_irq_move_cleanup_interrupt(void);
+ #endif
++extern asmlinkage void smp_acc_service_interrupt(void);
+ #ifdef CONFIG_SMP
+ extern void smp_reschedule_interrupt(struct pt_regs *);
+ extern void smp_call_function_interrupt(struct pt_regs *);
+diff -urN linux-3.10.0-862.el7.orig/arch/x86/include/asm/irq_vectors.h linux-3.10.0-862.el7/arch/x86/include/asm/irq_vectors.h
+--- linux-3.10.0-862.el7.orig/arch/x86/include/asm/irq_vectors.h	2018-03-22 05:40:12.000000000 +0800
++++ linux-3.10.0-862.el7/arch/x86/include/asm/irq_vectors.h	2018-11-10 12:44:45.197721868 +0800
+@@ -126,6 +126,7 @@
+  * sources per level' errata.
+  */
+ #define LOCAL_TIMER_VECTOR		0xef
++#define ACC_SERVICE_VECTOR		0xee
+ 
+ #define NR_VECTORS			 256
+
+
+diff -urN linux-3.10.0-862.el7.orig/arch/x86/kernel/apic/io_apic.c linux-3.10.0-862.el7/arch/x86/kernel/apic/io_apic.c
+--- linux-3.10.0-862.el7.orig/arch/x86/kernel/apic/io_apic.c	2018-03-22 05:40:12.000000000 +0800
++++ linux-3.10.0-862.el7/arch/x86/kernel/apic/io_apic.c	2018-11-10 13:05:57.481554850 +0800
+@@ -1330,8 +1330,12 @@
+ 			   cpumask_intersects(cfg->old_domain, cpu_online_mask);
+ 		}
+ 		for_each_cpu_and(new_cpu, tmp_mask, cpu_online_mask)
++                {       
++	                printk("Alloc cpu = %d,  vector %d, for irq %d\n", new_cpu, vector, irq);
+ 			per_cpu(vector_irq, new_cpu)[vector] = irq;
+-		cfg->vector = vector;
++		}
++                cfg->vector = vector;
++
+ 		cpumask_copy(cfg->domain, tmp_mask);
+ 		err = 0;
+ 		break;
+@@ -2299,6 +2303,13 @@
+ 	cfg->move_in_progress = 0;
+ }
+ 
++asmlinkage void smp_acc_service_interrupt(void)
++{
++	irq_enter();
++	exit_idle();
++        printk("START ACC SERVICE.\n");
++	irq_exit();
++}
+ asmlinkage void smp_irq_move_cleanup_interrupt(void)
+ {
+ 	unsigned vector, me;
+diff -urN linux-3.10.0-862.el7.orig/arch/x86/kernel/entry_64.S linux-3.10.0-862.el7/arch/x86/kernel/entry_64.S
+--- linux-3.10.0-862.el7.orig/arch/x86/kernel/entry_64.S	2018-03-22 05:40:12.000000000 +0800
++++ linux-3.10.0-862.el7/arch/x86/kernel/entry_64.S	2018-11-10 12:48:17.844766855 +0800
+@@ -1060,6 +1060,8 @@
+ 	reboot_interrupt smp_reboot_interrupt
+ #endif
+ 
++apicinterrupt3 ACC_SERVICE_VECTOR \
++	acc_service_interrupt smp_acc_service_interrupt
+ #ifdef CONFIG_X86_UV
+ apicinterrupt3 UV_BAU_MESSAGE \
+ 	uv_bau_message_intr1 uv_bau_message_interrupt
+diff -urN linux-3.10.0-862.el7.orig/arch/x86/kernel/irqinit.c linux-3.10.0-862.el7/arch/x86/kernel/irqinit.c
+--- linux-3.10.0-862.el7.orig/arch/x86/kernel/irqinit.c	2018-03-22 05:40:12.000000000 +0800
++++ linux-3.10.0-862.el7/arch/x86/kernel/irqinit.c	2018-11-10 12:51:16.928810657 +0800
+@@ -156,6 +156,7 @@
+ #ifdef CONFIG_X86_THERMAL_VECTOR
+ 	alloc_intr_gate(THERMAL_APIC_VECTOR, thermal_interrupt);
+ #endif
++	alloc_intr_gate(ACC_SERVICE_VECTOR, acc_service_interrupt);
+ #ifdef CONFIG_X86_MCE_THRESHOLD
+ 	alloc_intr_gate(THRESHOLD_APIC_VECTOR, threshold_interrupt);
+ #endif
+
