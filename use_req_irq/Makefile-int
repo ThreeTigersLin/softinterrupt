@@ -1,0 +1,10 @@
+
+obj-m += cmask.o
+cmask-objs := kcmask.o call_interrupt.o
+$(PWD)/call_interrupt.o: call_interrupt.asm 
+	nasm -f elf64 -o $@ $^
+all:
+	make -C  /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+
+clean:
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean

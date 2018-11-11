@@ -1,0 +1,4 @@
+obj-m += test.o
+test-objs := module.o main.o
+$(KBUILD_EXTMOD)/main.o: main.asm
+        nasm -f elf64 -o $@ $^
